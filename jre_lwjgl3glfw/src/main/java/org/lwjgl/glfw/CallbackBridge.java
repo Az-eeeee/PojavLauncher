@@ -1,7 +1,5 @@
 package org.lwjgl.glfw;
-import java.io.*;
 import java.util.*;
-import android.util.*;
 
 public class CallbackBridge {
     public static final int CLIPBOARD_COPY = 2000;
@@ -18,10 +16,6 @@ public class CallbackBridge {
     public static final int EVENT_TYPE_WINDOW_SIZE = 1008;
     
     public static final int ANDROID_TYPE_GRAB_STATE = 0;
-
-    // Should pending events be limited?
-    volatile public static List<Integer[]> PENDING_EVENT_LIST = new ArrayList<>();
-    volatile public static boolean PENDING_EVENT_READY = false;
     
     public static final boolean INPUT_DEBUG_ENABLED;
     
@@ -44,40 +38,14 @@ public class CallbackBridge {
 	    //Quick and dirty: debul all key inputs to System.out
 */
     }
-    
-    public static void sendGrabbing(boolean grab, int xset, int yset) {
-        // sendData(ANDROID_TYPE_GRAB_STATE, Boolean.toString(grab));
-        
-        GLFW.mGLFWIsGrabbing = grab;
-        nativeSetGrabbing(grab, xset, yset);
-    }
-    
-	// Called from Android side
-	public static void receiveCallback(int type, int i1, int i2, int i3, int i4) {
-       /*
-        if (INPUT_DEBUG_ENABLED) {
-            System.out.println("LWJGL GLFW Callback received type=" + Integer.toString(type) + ", data=" + i1 + ", " + i2 + ", " + i3 + ", " + i4);
-        }
-        */
-        if (PENDING_EVENT_READY) {
-            if (type == EVENT_TYPE_CURSOR_POS) {
-                GLFW.mGLFWCursorX = i1;
-                GLFW.mGLFWCursorY = i2;
-            } else {
-                PENDING_EVENT_LIST.add(new Integer[]{type, i1, i2, i3, i4});
-            }
-        } // else System.out.println("Event input is not ready yet!");
-	}
-    
+
+
     public static void sendData(int type, String data) {
         nativeSendData(false, type, data);
     }
-    
     public static native void nativeSendData(boolean isAndroid, int type, String data);
     public static native boolean nativeSetInputReady(boolean ready);
-    public static native String nativeClipboard(int action, String copy);
-    public static native void nativeAttachThreadToOther(boolean isAndroid, boolean isUseStackQueueBool);
-    
-    private static native void nativeSetGrabbing(boolean grab, int xset, int yset);
+    public static native String nativeClipboard(int action, byte[] copy);
+    public static native void nativeSetGrabbing(boolean grab);
 }
 

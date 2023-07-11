@@ -1,10 +1,13 @@
 package net.kdt.pojavlaunch.value.launcherprofiles;
+import androidx.annotation.Keep;
+
 import java.util.*;
 import net.kdt.pojavlaunch.*;
 
-public class MinecraftLauncherProfiles
-{
-	public Map<String, MinecraftProfile> profiles;
+@Keep
+public class MinecraftLauncherProfiles {
+	public Map<String, MinecraftProfile> profiles = new HashMap<>();
+	public boolean profilesWereMigrated;
 	public String clientToken;
 	public Map<String, MinecraftAuthenticationDatabase> authenticationDatabase;
 	// public Map launcherVersion;

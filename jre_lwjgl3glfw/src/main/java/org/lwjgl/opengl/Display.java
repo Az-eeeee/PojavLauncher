@@ -82,15 +82,7 @@ public class Display {
 
         mode = desktopDisplayMode = new DisplayMode(monitorWidth, monitorHeight, monitorBitPerPixel, monitorRefreshRate);
         LWJGLUtil.log("Initial mode: " + desktopDisplayMode);
-	if("true".equals(System.getProperty("org.lwjgl.opengl.disableStaticInit"))) {
-		LWJGLUtil.log("Static Display.create() disabled");
-	}else{
-        	// additional code workaround not called yet!
-        	LWJGLUtil.log("Calling Display.create()");
-        	try {
-        	    create();
-        	} catch (LWJGLException e) {throw new RuntimeException(e);}
-	}
+        if("opengles2".equals(System.getenv("POJAV_RENDERER"))) GLContext.initCapabilities();
     }
     
     public static void setSwapInterval(int value) {
@@ -344,6 +336,9 @@ public class Display {
                 latestResized = true;
                 latestWidth = width;
                 latestHeight = height;
+
+                //System.out.println("Window size callback");
+                if(parent != null) parent.setSize(width, height);
             }
         };
 
@@ -420,9 +415,9 @@ public class Display {
         Display.drawable = drawable;
         context = org.lwjgl.opengl.GLContext.createFromCurrent();
 
-        glfwSwapInterval(0);
+        //glfwSwapInterval(0);
         glfwShowWindow(Window.handle);
-
+        if(parent != null) parent.setSize(displayWidth, displayHeight);
         Mouse.create();
         Keyboard.create();
 
@@ -768,6 +763,7 @@ public class Display {
 
     public static void setVSyncEnabled(boolean sync) {
         vsyncEnabled = sync;
+        glfwSwapInterval(vsyncEnabled ? 1 : 0);
     }
 
     public static long getWindow() {
@@ -858,7 +854,7 @@ public class Display {
 
     public static void setDisplayMode(DisplayMode dm) throws LWJGLException {
         mode = dm;
-        GLFW.glfwSetWindowSize(Window.handle, dm.getWidth(), dm.getHeight());
+        if(isCreated) GLFW.glfwSetWindowSize(Window.handle, dm.getWidth(), dm.getHeight());
     }
 
     public static DisplayMode getDisplayMode() {
@@ -950,7 +946,7 @@ public class Display {
             } else {
                 glfwSetWindowIcon(Window.handle, new GLFWImage.Buffer(icons[0]));
             }
-        } catch (NullPointerException e) {
+        } catch (Exception e) {
             LWJGLUtil.log("Couldn't set icon");
             e.printStackTrace();
         }
@@ -958,7 +954,7 @@ public class Display {
     }
 
     public static void setResizable(boolean resizable) {
-        displayResizable = resizable;
+        //displayResizable = resizable;
         if (displayResizable ^ resizable) {
             if (Window.handle != 0) {
                 IntBuffer width = BufferUtils.createIntBuffer(1);
@@ -983,8 +979,10 @@ public class Display {
     }
 
     public static void setDisplayModeAndFullscreen(DisplayMode dm) throws LWJGLException {
-        Display.mode = dm;
-        GLFW.glfwSetWindowSize(Window.handle, dm.getWidth(), dm.getHeight());
+        if(Window.handle != 0) {
+            Display.mode = dm;
+            GLFW.glfwSetWindowSize(Window.handle, dm.getWidth(), dm.getHeight());
+        }
     }
 
     public static void setFullscreen(boolean fullscreen) throws LWJGLException {
@@ -1050,9 +1048,9 @@ public class Display {
      *            - the desired frame rate, in frames per second
      */
     public static void sync(int fps) {
-        if (vsyncEnabled)
+        /*if (vsyncEnabled)
             Sync.sync(60);
-        else Sync.sync(fps);
+        else*/ Sync.sync(fps);
     }
 
     public static Drawable getDrawable() {

@@ -1,5 +1,6 @@
 package net.kdt.pojavlaunch.prefs;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.Color;
@@ -15,10 +16,15 @@ import net.kdt.pojavlaunch.R;
 
 public class CustomSeekBarPreference extends SeekBarPreference {
 
-    private String suffix = "";
+    /** The suffix displayed */
+    private String mSuffix = "";
+    /** Custom minimum value to provide the same behavior as the usual setMin */
     private int mMin;
-    private TextView textView;
+    /** The textview associated by default to the preference */
+    private TextView mTextView;
 
+
+    @SuppressLint("PrivateResource")
     public CustomSeekBarPreference(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
         super(context, attrs, defStyleAttr, defStyleRes);
         TypedArray a = context.obtainStyledAttributes(
@@ -33,10 +39,9 @@ public class CustomSeekBarPreference extends SeekBarPreference {
 
     public CustomSeekBarPreference(Context context, AttributeSet attrs) {
         this(context, attrs, R.attr.seekBarPreferenceStyle);
-
     }
 
-    public CustomSeekBarPreference(Context context) {
+    @SuppressWarnings("unused") public CustomSeekBarPreference(Context context) {
         this(context, null);
     }
 
@@ -54,40 +59,40 @@ public class CustomSeekBarPreference extends SeekBarPreference {
         TextView titleTextView = (TextView) view.findViewById(android.R.id.title);
         titleTextView.setTextColor(Color.WHITE);
 
-        textView = (TextView) view.findViewById(R.id.seekbar_value);
-        textView.setTextAlignment(View.TEXT_ALIGNMENT_TEXT_START);
+        mTextView = (TextView) view.findViewById(R.id.seekbar_value);
+        mTextView.setTextAlignment(View.TEXT_ALIGNMENT_TEXT_START);
         SeekBar seekBar = (SeekBar) view.findViewById(R.id.seekbar);
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                textView.setText(String.valueOf(progress + mMin));
+                progress += mMin;
+                progress = progress / getSeekBarIncrement();
+                progress = progress * getSeekBarIncrement();
+                progress -= mMin;
+
+                mTextView.setText(String.valueOf(progress + mMin));
                 updateTextViewWithSuffix();
             }
 
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-
-            }
+            public void onStartTrackingTouch(SeekBar seekBar) {}
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                setValue(seekBar.getProgress() + mMin);
-                updateTextViewWithSuffix();
 
+                int progress = seekBar.getProgress() + mMin;
+                progress /= getSeekBarIncrement();
+                progress *= getSeekBarIncrement();
+                progress -= mMin;
+
+                setValue(progress + mMin);
+                updateTextViewWithSuffix();
             }
         });
 
         updateTextViewWithSuffix();
-    }
-
-
-
-    private void updateTextViewWithSuffix(){
-        if(!textView.getText().toString().endsWith(suffix)){
-            textView.setText(String.format("%s%s", textView.getText(), suffix));
-        }
-
     }
 
     /**
@@ -95,7 +100,7 @@ public class CustomSeekBarPreference extends SeekBarPreference {
      * @param suffix The suffix to append as a String
      */
     public void setSuffix(String suffix) {
-        this.suffix = suffix;
+        this.mSuffix = suffix;
     }
 
     /**
@@ -106,5 +111,12 @@ public class CustomSeekBarPreference extends SeekBarPreference {
     public void setRange(int min, int max){
         setMin(min);
         setMax(max);
+    }
+
+
+    private void updateTextViewWithSuffix(){
+        if(!mTextView.getText().toString().endsWith(mSuffix)){
+            mTextView.setText(String.format("%s%s", mTextView.getText(), mSuffix));
+        }
     }
 }

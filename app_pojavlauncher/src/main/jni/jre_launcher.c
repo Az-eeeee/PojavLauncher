@@ -35,6 +35,7 @@
 
 #include "log.h"
 #include "utils.h"
+#include "environ/environ.h"
 
 // Uncomment to try redirect signal handling to JVM
 // #define TRY_SIG2JVM
@@ -85,7 +86,7 @@ typedef jint JLI_Launch_func(int argc, char ** argv, /* main argc, argc */
 
 static jint launchJVM(int margc, char** margv) {
    void* libjli = dlopen("libjli.so", RTLD_LAZY | RTLD_GLOBAL);
-   
+
    // Boardwalk: silence
    // LOGD("JLI lib = %x", (int)libjli);
    if (NULL == libjli) {
@@ -148,7 +149,7 @@ JNIEXPORT jint JNICALL Java_com_oracle_dalvik_VMLauncher_launchJVM(JNIEnv *env, 
    // SA_RESETHAND;
 #define CATCHSIG(X) sigaction(X, &catcher, &old_sa[X])
     CATCHSIG(SIGILL);
-    CATCHSIG(SIGABRT);
+    //CATCHSIG(SIGABRT);
     CATCHSIG(SIGBUS);
     CATCHSIG(SIGFPE);
 #ifdef TRY_SIG2JVM
@@ -160,7 +161,7 @@ JNIEXPORT jint JNICALL Java_com_oracle_dalvik_VMLauncher_launchJVM(JNIEnv *env, 
    //Signal trapper ready
 
     // Save dalvik JNIEnv pointer for JVM launch thread
-    dalvikJNIEnvPtr_ANDROID = env;
+    pojav_environ->dalvikJNIEnvPtr_ANDROID = env;
 
     if (argsArray == NULL) {
         LOGE("Args array null, returning");
@@ -170,15 +171,15 @@ JNIEXPORT jint JNICALL Java_com_oracle_dalvik_VMLauncher_launchJVM(JNIEnv *env, 
 
     int argc = (*env)->GetArrayLength(env, argsArray);
     char **argv = convert_to_char_array(env, argsArray);
-    
+
     LOGD("Done processing args");
 
     res = launchJVM(argc, argv);
 
     LOGD("Going to free args");
     free_char_array(env, argsArray, argv);
-    
+
     LOGD("Free done");
-   
+
     return res;
 }

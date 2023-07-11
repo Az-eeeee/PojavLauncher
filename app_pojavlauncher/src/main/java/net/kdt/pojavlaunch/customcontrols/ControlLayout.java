@@ -1,28 +1,61 @@
 package net.kdt.pojavlaunch.customcontrols;
-import android.content.*;
-import android.util.*;
-import android.view.*;
-import android.widget.*;
-import com.google.gson.*;
-import java.io.*;
-import java.util.ArrayList;
-import java.util.HashMap;
 
+import static android.content.Context.INPUT_METHOD_SERVICE;
+import static net.kdt.pojavlaunch.Tools.currentDisplayMetrics;
 
-import net.kdt.pojavlaunch.*;
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.os.Build;
+import android.util.AttributeSet;
+import android.util.Log;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.Toast;
+
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.gson.JsonSyntaxException;
+import com.kdt.pickafile.FileListView;
+import com.kdt.pickafile.FileSelectedListener;
+
+import net.kdt.pojavlaunch.MinecraftGLSurface;
+import net.kdt.pojavlaunch.R;
+import net.kdt.pojavlaunch.Tools;
 import net.kdt.pojavlaunch.customcontrols.buttons.ControlButton;
 import net.kdt.pojavlaunch.customcontrols.buttons.ControlDrawer;
+import net.kdt.pojavlaunch.customcontrols.buttons.ControlInterface;
 import net.kdt.pojavlaunch.customcontrols.buttons.ControlSubButton;
-import net.kdt.pojavlaunch.customcontrols.handleview.HandleView;
-import net.kdt.pojavlaunch.prefs.*;
+import net.kdt.pojavlaunch.customcontrols.handleview.ActionRow;
+import net.kdt.pojavlaunch.customcontrols.handleview.ControlHandleView;
+import net.kdt.pojavlaunch.customcontrols.handleview.EditControlPopup;
+import net.kdt.pojavlaunch.prefs.LauncherPreferences;
 
-public class ControlLayout extends FrameLayout
-{
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
+public class ControlLayout extends FrameLayout {
 	protected CustomControls mLayout;
-	private boolean mModifiable;
-	private CustomControlsActivity mActivity;
+	/* Accessible when inside the game by ControlInterface implementations, cached for perf. */
+	private MinecraftGLSurface mGameSurface = null;
+
+	/* Cache to buttons for performance purposes */
+	private List<ControlInterface> mButtons;
+	private boolean mModifiable = false;
+	private boolean mIsModified;
 	private boolean mControlVisible = false;
-    
+
+	private EditControlPopup mControlPopup = null;
+	private ControlHandleView mHandleView;
+	private ControlButtonMenuListener mMenuListener;
+	public ActionRow mActionRow = null;
+	public String mLayoutFileName;
+
 	public ControlLayout(Context ctx) {
 		super(ctx);
 	}
@@ -31,38 +64,36 @@ public class ControlLayout extends FrameLayout
 		super(ctx, attrs);
 	}
 
-	public void hideAllHandleViews() {
-		for(ControlButton button : getButtonChildren()){
-			HandleView hv = button.getHandleView();
-			if(hv != null) hv.hide();
-		}
-	}
 
 	public void loadLayout(String jsonPath) throws IOException, JsonSyntaxException {
 		CustomControls layout = LayoutConverter.loadAndConvertIfNecessary(jsonPath);
 		if(layout != null) {
 			loadLayout(layout);
-		}else{
-			throw new IOException("Unsupported control layout version");
+			updateLoadedFileName(jsonPath);
+			return;
 		}
+
+		throw new IOException("Unsupported control layout version");
 	}
 
 	public void loadLayout(CustomControls controlLayout) {
-        if (mModifiable)
-            hideAllHandleViews();
+		if(mActionRow == null){
+			mActionRow = new ActionRow(getContext());
+			addView(mActionRow);
+		}
 
-        removeAllButtons();
+		removeAllButtons();
 		if(mLayout != null) {
 			mLayout.mControlDataList = null;
 			mLayout = null;
 		}
 
-        System.gc();
+		System.gc();
 		mapTable.clear();
 
-        // Cleanup buttons only when input layout is null
-        if (controlLayout == null) return;
-        
+		// Cleanup buttons only when input layout is null
+		if (controlLayout == null) return;
+
 		mLayout = controlLayout;
 
 		//CONTROL BUTTON
@@ -74,14 +105,13 @@ public class ControlLayout extends FrameLayout
 		for(ControlDrawerData drawerData : controlLayout.mDrawerDataList){
 			ControlDrawer drawer = addDrawerView(drawerData);
 			if(mModifiable) drawer.areButtonsVisible = true;
-
-
-
 		}
 
-        mLayout.scaledAt = LauncherPreferences.PREF_BUTTONSIZE;
+		mLayout.scaledAt = LauncherPreferences.PREF_BUTTONSIZE;
 
 		setModified(false);
+		mButtons = null;
+		getButtonChildren(); // Force refresh
 	} // loadLayout
 
 	//CONTROL BUTTON
@@ -92,12 +122,12 @@ public class ControlLayout extends FrameLayout
 
 	private void addControlView(ControlData controlButton) {
 		final ControlButton view = new ControlButton(this, controlButton);
-		view.setModifiable(mModifiable);
-        if (!mModifiable) {
-            view.setAlpha(view.getProperties().opacity);
+
+		if (!mModifiable) {
+			view.setAlpha(view.getProperties().opacity);
 			view.setFocusable(false);
 			view.setFocusableInTouchMode(false);
-        }
+		}
 		addView(view);
 
 		setModified(true);
@@ -116,7 +146,7 @@ public class ControlLayout extends FrameLayout
 	private ControlDrawer addDrawerView(ControlDrawerData drawerData){
 
 		final ControlDrawer view = new ControlDrawer(this,drawerData == null ? mLayout.mDrawerDataList.get(mLayout.mDrawerDataList.size()-1) : drawerData);
-		view.setModifiable(mModifiable);
+
 		if (!mModifiable) {
 			view.setAlpha(view.getProperties().opacity);
 			view.setFocusable(false);
@@ -139,9 +169,9 @@ public class ControlLayout extends FrameLayout
 		addSubView(drawer, drawer.getDrawerData().buttonProperties.get(drawer.getDrawerData().buttonProperties.size()-1 ));
 	}
 
-	public void addSubView(ControlDrawer drawer, ControlData controlButton){
+	private void addSubView(ControlDrawer drawer, ControlData controlButton){
 		final ControlSubButton view = new ControlSubButton(this, controlButton, drawer);
-		view.setModifiable(mModifiable);
+
 		if (!mModifiable) {
 			view.setAlpha(view.getProperties().opacity);
 			view.setFocusable(false);
@@ -156,9 +186,10 @@ public class ControlLayout extends FrameLayout
 		setModified(true);
 	}
 
-    private void removeAllButtons() {
-		for(View v : getButtonChildren()){
-			removeView(v);
+
+	private void removeAllButtons() {
+		for(ControlInterface button : getButtonChildren()){
+			removeView(button.getControlView());
 		}
 
 		System.gc();
@@ -166,44 +197,9 @@ public class ControlLayout extends FrameLayout
 		//because if frames will slowly go down after many control changes it will be warm and bad
 	}
 
-	public void removeControlButton(ControlButton controlButton) {
-		mLayout.mControlDataList.remove(controlButton.getProperties());
-		controlButton.setVisibility(View.GONE);
-		removeView(controlButton);
-
-		setModified(true);
-	}
-
-	public void removeControlDrawer(ControlDrawer controlDrawer){
-		for(ControlSubButton subButton : controlDrawer.buttons){
-			subButton.setVisibility(GONE);
-			removeView(subButton);
-		}
-		mLayout.mDrawerDataList.remove(controlDrawer.getDrawerData());
-		controlDrawer.setVisibility(GONE);
-		removeView(controlDrawer);
-
-		setModified(true);
-	}
-
-	public void removeControlSubButton(ControlSubButton subButton){
-		subButton.parentDrawer.drawerData.buttonProperties.remove(subButton.getProperties());
-		subButton.parentDrawer.buttons.remove(subButton);
-
-		subButton.parentDrawer.syncButtons();
-
-		subButton.setVisibility(GONE);
-		removeView(subButton);
-
-	}
-
 	public void saveLayout(String path) throws Exception {
 		mLayout.save(path);
 		setModified(false);
-	}
-
-	public void setActivity(CustomControlsActivity activity) {
-		mActivity = activity;
 	}
 
 	public void toggleControlVisible(){
@@ -215,22 +211,24 @@ public class ControlLayout extends FrameLayout
 		return mLayout.scaledAt;
 	}
 
+	public CustomControls getLayout(){
+		return mLayout;
+	}
+
 	public void setControlVisible(boolean isVisible) {
 		if (mModifiable) return; // Not using on custom controls activity
 
 		mControlVisible = isVisible;
-		for(ControlButton button : getButtonChildren()){
+		for(ControlInterface button : getButtonChildren()){
 			button.setVisible(isVisible);
 		}
 	}
-	
+
 	public void setModifiable(boolean isModifiable) {
-		mModifiable = isModifiable;
-		for(ControlButton button : getButtonChildren()){
-			button.setModifiable(isModifiable);
-			if (!isModifiable)
-				button.setAlpha(button.getProperties().opacity);
+		if(!isModifiable && mModifiable){
+			removeEditWindow();
 		}
+		mModifiable = isModifiable;
 	}
 
 	public boolean getModifiable(){
@@ -238,62 +236,324 @@ public class ControlLayout extends FrameLayout
 	}
 
 	public void setModified(boolean isModified) {
-		if (mActivity != null) mActivity.isModified = isModified;
-
+		mIsModified = isModified;
 	}
 
-	public ArrayList<ControlButton> getButtonChildren(){
-		ArrayList<ControlButton> children = new ArrayList<>();
-		for(int i=0; i<getChildCount(); ++i){
-			View v = getChildAt(i);
-			if(v instanceof ControlButton)
-				children.add(((ControlButton) v));
+	public List<ControlInterface> getButtonChildren(){
+		if(mModifiable || mButtons == null){
+			mButtons = new ArrayList<>();
+			for(int i=0; i<getChildCount(); ++i){
+				View v = getChildAt(i);
+				if(v instanceof ControlInterface)
+					mButtons.add(((ControlInterface) v));
+			}
 		}
-		return children;
+
+		return mButtons;
 	}
 
-	HashMap<View, ControlButton> mapTable = new HashMap<>();
+	public void refreshControlButtonPositions(){
+		for(ControlInterface button : getButtonChildren()){
+			button.setDynamicX(button.getProperties().dynamicX);
+			button.setDynamicY(button.getProperties().dynamicY);
+		}
+	}
+
+    @Override
+    public void onViewRemoved(View child) {
+        super.onViewRemoved(child);
+        if(child instanceof ControlInterface && mControlPopup != null){
+            mControlPopup.disappearColor();
+            mControlPopup.disappear();
+        }
+    }
+
+    /**
+	 * Load the layout if needed, and pass down the burden of filling values
+	 * to the button at hand.
+	 */
+	public void editControlButton(ControlInterface button){
+		if(mControlPopup == null){
+			// When the panel is null, it needs to inflate first.
+			// So inflate it, then process it on the next frame
+			mControlPopup = new EditControlPopup(getContext(), this);
+			post(() -> editControlButton(button));
+			return;
+		}
+
+		mControlPopup.internalChanges = true;
+		mControlPopup.setCurrentlyEditedButton(button);
+		button.loadEditValues(mControlPopup);
+
+		mControlPopup.internalChanges = false;
+
+		mControlPopup.appear(button.getControlView().getX() + button.getControlView().getWidth()/2f < currentDisplayMetrics.widthPixels/2f);
+		mControlPopup.disappearColor();
+
+		if(mHandleView == null){
+			mHandleView = new ControlHandleView(getContext());
+			addView(mHandleView);
+		}
+		mHandleView.setControlButton(button);
+
+		//mHandleView.show();
+	}
+
+	/** Swap the panel if the button position requires it */
+	public void adaptPanelPosition(){
+		if(mControlPopup != null)
+			mControlPopup.adaptPanelPosition();
+	}
+
+
+	final HashMap<View, ControlInterface> mapTable = new HashMap<>();
+
 	//While this is called onTouch, this should only be called from a ControlButton.
-	public boolean onTouch(View v, MotionEvent ev) {
-		ControlButton lastControlButton = mapTable.get(v);
+	public void onTouch(View v, MotionEvent ev) {
+		ControlInterface lastControlButton = mapTable.get(v);
+
+		// Map location to screen coordinates
+		ev.offsetLocation(v.getX(), v.getY());
+
 
 		//Check if the action is cancelling, reset the lastControl button associated to the view
-		if(ev.getActionMasked() == MotionEvent.ACTION_UP || ev.getActionMasked() == MotionEvent.ACTION_CANCEL){
-			if(lastControlButton != null) lastControlButton.sendKeyPresses(false);
+		if (ev.getActionMasked() == MotionEvent.ACTION_UP
+				|| ev.getActionMasked() == MotionEvent.ACTION_CANCEL
+				|| ev.getActionMasked() == MotionEvent.ACTION_POINTER_UP) {
+			if (lastControlButton != null) lastControlButton.sendKeyPresses(false);
 			mapTable.put(v, null);
-			return true;
+			return;
 		}
 
-		if(ev.getActionMasked() != MotionEvent.ACTION_MOVE) return false;
+		if (ev.getActionMasked() != MotionEvent.ACTION_MOVE) return;
+
 
 		//Optimization pass to avoid looking at all children again
-		if(lastControlButton != null){
-			if(	ev.getRawX() > lastControlButton.getX() && ev.getRawX() < lastControlButton.getX() + lastControlButton.getWidth() &&
-				ev.getRawY() > lastControlButton.getY() && ev.getRawY() < lastControlButton.getY() + lastControlButton.getHeight()){
-				return true;
+		if (lastControlButton != null) {
+			System.out.println("last control button check" + ev.getX() + "-" + ev.getY() + "-" + lastControlButton.getControlView().getX() + "-" + lastControlButton.getControlView().getY());
+			if (ev.getX() > lastControlButton.getControlView().getX()
+					&& ev.getX() < lastControlButton.getControlView().getX() + lastControlButton.getControlView().getWidth()
+					&& ev.getY() > lastControlButton.getControlView().getY()
+					&& ev.getY() < lastControlButton.getControlView().getY() + lastControlButton.getControlView().getHeight()) {
+				return;
 			}
 		}
 
 		//Release last keys
 		if (lastControlButton != null) lastControlButton.sendKeyPresses(false);
-		mapTable.put(v, null);
+		mapTable.remove(v);
 
-		//Look for another SWIPEABLE button
-		for(ControlButton button : getButtonChildren()){
-			if(!button.getProperties().isSwipeable) continue;
+		// Update the state of all swipeable buttons
+		for (ControlInterface button : getButtonChildren()) {
+			if (!button.getProperties().isSwipeable) continue;
 
-			if(	ev.getRawX() > button.getX() && ev.getRawX() < button.getX() + button.getWidth() &&
-				ev.getRawY() > button.getY() && ev.getRawY() < button.getY() + button.getHeight()){
+			if (ev.getX() > button.getControlView().getX()
+					&& ev.getX() < button.getControlView().getX() + button.getControlView().getWidth()
+					&& ev.getY() > button.getControlView().getY()
+					&& ev.getY() < button.getControlView().getY() + button.getControlView().getHeight()) {
 
 				//Press the new key
-				if(!button.equals(lastControlButton)){
+				if (!button.equals(lastControlButton)) {
 					button.sendKeyPresses(true);
-
 					mapTable.put(v, button);
+					return;
 				}
-				return true;
+
+			}
+		}
+	}
+
+	@SuppressLint("ClickableViewAccessibility")
+	@Override
+	public boolean onTouchEvent(MotionEvent event) {
+		if (mModifiable && event.getActionMasked() != MotionEvent.ACTION_UP || mControlPopup == null)
+			return true;
+
+		InputMethodManager imm = (InputMethodManager) getContext().getSystemService(INPUT_METHOD_SERVICE);
+
+		// When the input window cannot be hidden, it returns false
+		if(!imm.hideSoftInputFromWindow(getWindowToken(), 0)){
+			if(mControlPopup.disappearLayer()){
+				mActionRow.setFollowedButton(null);
+				mHandleView.hide();
+			}
+		}
+		return true;
+	}
+
+	public void removeEditWindow() {
+		InputMethodManager imm = (InputMethodManager) getContext().getSystemService(INPUT_METHOD_SERVICE);
+
+		// When the input window cannot be hidden, it returns false
+		imm.hideSoftInputFromWindow(getWindowToken(), 0);
+		if(mControlPopup != null) {
+			mControlPopup.disappearColor();
+			mControlPopup.disappear();
+		}
+
+		if(mActionRow != null) mActionRow.setFollowedButton(null);
+		if(mHandleView != null) mHandleView.hide();
+	}
+
+	public void save(String path){
+		try {
+			mLayout.save(path);
+		} catch (IOException e) {Log.e("ControlLayout", "Failed to save the layout at:" + path);}
+	}
+
+
+	public boolean hasMenuButton() {
+		for(ControlInterface controlInterface : getButtonChildren()){
+			for (int keycode : controlInterface.getProperties().keycodes) {
+				if (keycode == ControlData.SPECIALBTN_MENU) return true;
 			}
 		}
 		return false;
+	}
+
+	public void setMenuListener(ControlButtonMenuListener menuListener) {
+		this.mMenuListener = menuListener;
+	}
+
+	public void notifyAppMenu() {
+		if(mMenuListener != null) mMenuListener.onClickedMenu();
+	}
+
+	/** Cached getter for perf purposes */
+	public MinecraftGLSurface getGameSurface(){
+		if(mGameSurface == null){
+			mGameSurface = findViewById(R.id.main_game_render_view);
+		}
+		return mGameSurface;
+	}
+
+	public void askToExit(EditorExitable editorExitable) {
+		if(mIsModified) {
+			openSaveDialog(editorExitable);
+		}else{
+			openExitDialog(editorExitable);
+		}
+	}
+
+	public void updateLoadedFileName(String path) {
+		path = path.replace(Tools.CTRLMAP_PATH, ".");
+		path = path.substring(0, path.length() - 5);
+		mLayoutFileName = path;
+	}
+
+	public String saveToDirectory(String name) throws Exception{
+		String jsonPath = Tools.CTRLMAP_PATH + "/" + name + ".json";
+		saveLayout(jsonPath);
+		return jsonPath;
+	}
+
+	class OnClickExitListener implements View.OnClickListener {
+		private final AlertDialog mDialog;
+		private final EditText mEditText;
+		private final EditorExitable mListener;
+
+		public OnClickExitListener(AlertDialog mDialog, EditText mEditText, EditorExitable mListener) {
+			this.mDialog = mDialog;
+			this.mEditText = mEditText;
+			this.mListener = mListener;
+		}
+
+		@Override
+		public void onClick(View v) {
+			Context context = v.getContext();
+			if (mEditText.getText().toString().isEmpty()) {
+				mEditText.setError(context.getString(R.string.global_error_field_empty));
+				return;
+			}
+			try {
+				String jsonPath = saveToDirectory(mEditText.getText().toString());
+				Toast.makeText(context, context.getString(R.string.global_save) + ": " + jsonPath, Toast.LENGTH_SHORT).show();
+				mDialog.dismiss();
+				if(mListener != null) mListener.exitEditor();
+			} catch (Throwable th) {
+				Tools.showError(context, th, mListener != null);
+			}
+		}
+	}
+
+	public void openSaveDialog(EditorExitable editorExitable) {
+		final Context context = getContext();
+		final EditText edit = new EditText(context);
+		edit.setSingleLine();
+		edit.setText(mLayoutFileName);
+
+		AlertDialog.Builder builder = new AlertDialog.Builder(context);
+		builder.setTitle(R.string.global_save);
+		builder.setView(edit);
+		builder.setPositiveButton(android.R.string.ok, null);
+		builder.setNegativeButton(android.R.string.cancel, null);
+		if(editorExitable != null) builder.setNeutralButton(R.string.global_save_and_exit, null);
+		final AlertDialog dialog = builder.create();
+		dialog.setOnShowListener(dialogInterface -> {
+			dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+					.setOnClickListener(new OnClickExitListener(dialog, edit, null));
+			if(editorExitable != null) dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+					.setOnClickListener(new OnClickExitListener(dialog, edit, editorExitable));
+		});
+		dialog.show();
+	}
+
+	public void openLoadDialog() {
+		AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+		builder.setTitle(R.string.global_load);
+		builder.setPositiveButton(android.R.string.cancel, null);
+
+		final AlertDialog dialog = builder.create();
+		FileListView flv = new FileListView(dialog, "json");
+		if(Build.VERSION.SDK_INT < 29)flv.listFileAt(new File(Tools.CTRLMAP_PATH));
+		else flv.lockPathAt(new File(Tools.CTRLMAP_PATH));
+		flv.setFileSelectedListener(new FileSelectedListener(){
+
+			@Override
+			public void onFileSelected(File file, String path) {
+				try {
+					loadLayout(path);
+				}catch (IOException e) {
+					Tools.showError(getContext(), e);
+				}
+				dialog.dismiss();
+			}
+		});
+		dialog.setView(flv);
+		dialog.show();
+	}
+
+	public void openSetDefaultDialog() {
+		AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+		builder.setTitle(R.string.customctrl_selectdefault);
+		builder.setPositiveButton(android.R.string.cancel, null);
+
+		final AlertDialog dialog = builder.create();
+		FileListView flv = new FileListView(dialog, "json");
+		flv.lockPathAt(new File(Tools.CTRLMAP_PATH));
+		flv.setFileSelectedListener(new FileSelectedListener(){
+
+			@Override
+			public void onFileSelected(File file, String path) {
+				try {
+					LauncherPreferences.DEFAULT_PREF.edit().putString("defaultCtrl", path).apply();
+					LauncherPreferences.PREF_DEFAULTCTRL_PATH = path;loadLayout(path);
+				}catch (IOException|JsonSyntaxException e) {
+					Tools.showError(getContext(), e);
+				}
+				dialog.dismiss();
+			}
+		});
+		dialog.setView(flv);
+		dialog.show();
+	}
+
+	public void openExitDialog(EditorExitable exitListener) {
+		AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+		builder.setTitle(R.string.customctrl_editor_exit_title);
+		builder.setMessage(R.string.customctrl_editor_exit_msg);
+		builder.setPositiveButton(R.string.global_yes, (d,w)->exitListener.exitEditor());
+		builder.setNegativeButton(R.string.global_no, (d,w)->{});
+		builder.show();
 	}
 }

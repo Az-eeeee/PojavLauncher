@@ -1,21 +1,26 @@
 package net.kdt.pojavlaunch.customcontrols;
 
-import android.util.*;
+import static net.kdt.pojavlaunch.LwjglGlfwKeycode.GLFW_KEY_UNKNOWN;
 
-import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.*;
-import net.kdt.pojavlaunch.*;
+import android.util.ArrayMap;
+
+import androidx.annotation.Keep;
+
+import net.kdt.pojavlaunch.Tools;
 import net.kdt.pojavlaunch.prefs.LauncherPreferences;
-import net.kdt.pojavlaunch.utils.*;
-import net.objecthunter.exp4j.*;
+import net.kdt.pojavlaunch.utils.JSONUtils;
+import net.objecthunter.exp4j.ExpressionBuilder;
 import net.objecthunter.exp4j.function.Function;
 
-import org.lwjgl.glfw.*;
+import org.lwjgl.glfw.CallbackBridge;
 
-import static net.kdt.pojavlaunch.LWJGLGLFWKeycode.GLFW_KEY_UNKNOWN;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
+@Keep
 public class ControlData {
 
     public static final int SPECIALBTN_KEYBOARD = -1;
@@ -26,18 +31,18 @@ public class ControlData {
     public static final int SPECIALBTN_MOUSEMID = -6;
     public static final int SPECIALBTN_SCROLLUP = -7;
     public static final int SPECIALBTN_SCROLLDOWN = -8;
+    public static final int SPECIALBTN_MENU = -9;
     
     private static ControlData[] SPECIAL_BUTTONS;
-    private static String[] SPECIAL_BUTTON_NAME_ARRAY;
+    private static List<String> SPECIAL_BUTTON_NAME_ARRAY;
 
     // Internal usage only
     public boolean isHideable;
 
     private static WeakReference<ExpressionBuilder> builder = new WeakReference<>(null);
-    private static WeakReference<Field> expression = new WeakReference<>(null);
     private static WeakReference<ArrayMap<String , String>> conversionMap = new WeakReference<>(null);
     static {
-        bypassExpressionBuilder();
+        buildExpressionBuilder();
         buildConversionMap();
     }
 
@@ -63,20 +68,22 @@ public class ControlData {
 
                 new ControlData("MID", new int[]{SPECIALBTN_MOUSEMID}, "${margin}", "${margin}"),
                 new ControlData("SCROLLUP", new int[]{SPECIALBTN_SCROLLUP}, "${margin}", "${margin}"),
-                new ControlData("SCROLLDOWN", new int[]{SPECIALBTN_SCROLLDOWN}, "${margin}", "${margin}")
+                new ControlData("SCROLLDOWN", new int[]{SPECIALBTN_SCROLLDOWN}, "${margin}", "${margin}"),
+                new ControlData("MENU", new int[]{SPECIALBTN_MENU}, "${margin}", "${margin}")
             };
         }
 
         return SPECIAL_BUTTONS;
     }
 
-    public static String[] buildSpecialButtonArray() {
+    public static List<String> buildSpecialButtonArray() {
         if (SPECIAL_BUTTON_NAME_ARRAY == null) {
-            List<String> nameList = new ArrayList<String>();
+            List<String> nameList = new ArrayList<>();
             for (ControlData btn : getSpecialButtons()) {
-                nameList.add(btn.name);
+                nameList.add("SPECIAL_" + btn.name);
             }
-            SPECIAL_BUTTON_NAME_ARRAY = nameList.toArray(new String[0]);
+            SPECIAL_BUTTON_NAME_ARRAY = nameList;
+            Collections.reverse(SPECIAL_BUTTON_NAME_ARRAY);
         }
 
         return SPECIAL_BUTTON_NAME_ARRAY;
@@ -102,7 +109,7 @@ public class ControlData {
     }
 
     public ControlData(String name, int[] keycodes) {
-        this(name, keycodes, Tools.currentDisplayMetrics.widthPixels/2, Tools.currentDisplayMetrics.heightPixels/2);
+        this(name, keycodes, Tools.currentDisplayMetrics.widthPixels/2f, Tools.currentDisplayMetrics.heightPixels/2f);
     }
 
     public ControlData(String name, int[] keycodes, float x, float y) {
@@ -171,12 +178,6 @@ public class ControlData {
                 controlData.cornerRadius
         );
     }
-    
-    public void execute(boolean isDown) {
-        for(int keycode : keycodes){
-            BaseMainActivity.sendKeyPress(keycode, 0, isDown);
-        }
-    }
 
     
     public float insertDynamicPos(String dynamicPos) {
@@ -199,6 +200,7 @@ public class ControlData {
     }
 
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean containsKeycode(int keycodeToCheck){
         for(int keycode : keycodes)
             if(keycodeToCheck == keycode)
@@ -226,11 +228,9 @@ public class ControlData {
     }
 
     /**
-     * Create a weak reference to a builder and its expression field.
-     * Although VERY bad practice it isn't slower due to saved GC time.
-     * The normal way requires us to create ONE builder and TWO functions for EACH button.
+     * Create a builder, keep a weak reference to it to use it with all views on first inflation
      */
-    private static void bypassExpressionBuilder(){
+    private static void buildExpressionBuilder(){
         ExpressionBuilder expressionBuilder = new ExpressionBuilder("1 + 1")
                 .function(new Function("dp", 1) {
                     @Override
@@ -245,11 +245,6 @@ public class ControlData {
                     }
                 });
         builder = new WeakReference<>(expressionBuilder);
-        try {
-            expression = new WeakReference<>(builder.get().getClass().getDeclaredField("expression"));
-            expression.get().setAccessible(true);
-            expression.get().set(expression.get(), expression.get().getModifiers() & ~Modifier.FINAL);
-        }catch (Exception ignored){}
     }
 
     /**
@@ -257,10 +252,8 @@ public class ControlData {
      * @param stringExpression the expression to set.
      */
     private static void setExpression(String stringExpression){
-        if(builder.get() == null) bypassExpressionBuilder();
-        try {
-            expression.get().set(builder.get(), stringExpression);
-        }catch (IllegalAccessException e){}
+        if(builder.get() == null) buildExpressionBuilder();
+        builder.get().expression(stringExpression);
     }
 
     /**
@@ -276,10 +269,10 @@ public class ControlData {
         keyValueMap.put("bottom", "DUMMY_BOTTOM");
         keyValueMap.put("width", "DUMMY_WIDTH");
         keyValueMap.put("height", "DUMMY_HEIGHT");
-        keyValueMap.put("screen_width", Integer.toString(CallbackBridge.physicalWidth));
-        keyValueMap.put("screen_height", Integer.toString(CallbackBridge.physicalHeight));
+        keyValueMap.put("screen_width", "DUMMY_DATA" );
+        keyValueMap.put("screen_height", "DUMMY_DATA");
         keyValueMap.put("margin", Integer.toString((int) Tools.dpToPx(2)));
-        keyValueMap.put("preferred_scale", Float.toString(LauncherPreferences.PREF_BUTTONSIZE));
+        keyValueMap.put("preferred_scale", "DUMMY_DATA");
 
         conversionMap = new WeakReference<>(keyValueMap);
     }
@@ -300,6 +293,9 @@ public class ControlData {
         valueMap.put("bottom", Float.toString(CallbackBridge.physicalHeight - getHeight()));
         valueMap.put("width", Float.toString(getWidth()));
         valueMap.put("height", Float.toString(getHeight()));
+        valueMap.put("screen_width",Integer.toString(CallbackBridge.physicalWidth));
+        valueMap.put("screen_height",Integer.toString(CallbackBridge.physicalHeight));
+        valueMap.put("preferred_scale", Float.toString(LauncherPreferences.PREF_BUTTONSIZE));
 
         return valueMap;
     }

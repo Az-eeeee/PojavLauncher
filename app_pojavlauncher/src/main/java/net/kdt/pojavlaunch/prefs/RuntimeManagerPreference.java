@@ -1,15 +1,18 @@
 package net.kdt.pojavlaunch.prefs;
 
+import android.app.Activity;
 import android.content.Context;
 import android.util.AttributeSet;
 
 import androidx.preference.Preference;
 
-import net.kdt.pojavlaunch.BaseLauncherActivity;
+
 import net.kdt.pojavlaunch.multirt.MultiRTConfigDialog;
 
 public class RuntimeManagerPreference extends Preference{
-    public RuntimeManagerPreference(Context ctx) {
+    private MultiRTConfigDialog mDialogScreen;
+
+    @SuppressWarnings("unused") public RuntimeManagerPreference(Context ctx) {
         this(ctx, null);
     }
 
@@ -17,9 +20,13 @@ public class RuntimeManagerPreference extends Preference{
         super(ctx, attrs);
         setPersistent(false);
     }
+
     @Override
     protected void onClick() {
-        super.onClick();
-        ((BaseLauncherActivity)this.getContext()).mRuntimeConfigDialog.dialog.show();
+        if(mDialogScreen == null){
+            mDialogScreen = new MultiRTConfigDialog();
+            mDialogScreen.prepare(((Activity) getContext()));
+        }
+        mDialogScreen.show();
     }
 }
